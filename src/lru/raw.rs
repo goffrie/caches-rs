@@ -29,44 +29,33 @@ use alloc::collections::{BTreeMap, BTreeSet, BinaryHeap, LinkedList, VecDeque};
 use alloc::vec::Vec;
 use core::fmt;
 use core::hash::{BuildHasher, Hash};
-use core::iter::{FromIterator, FusedIterator};
+use core::iter::{FromIterator, FusedIterator, Rev};
 use core::marker::PhantomData;
 use core::mem;
 use core::ptr;
 use core::usize;
+use hashbrown::hash_map::RawEntryMut;
+use hashbrown::HashMap;
+use indexmap::IndexMap;
 
 use crate::cache_api::ResizableCache;
 use crate::lru::CacheError;
-use crate::{
-    Cache, DefaultEvictCallback, DefaultHashBuilder, HashMap, HashSet, KeyRef, OnEvictCallback,
-    PutResult,
-};
+use crate::{Cache, DefaultEvictCallback, DefaultHashBuilder, HashSet, OnEvictCallback, PutResult};
 
 // Struct used to hold a key value pair. Also contains references to previous and next entries
 // so we can maintain the entries in a linked list ordered by their use.
-pub(crate) struct EntryNode<K, V> {
-    pub(crate) key: mem::MaybeUninit<K>,
-    pub(crate) val: mem::MaybeUninit<V>,
-    prev: *mut EntryNode<K, V>,
-    next: *mut EntryNode<K, V>,
+pub(crate) struct EntryNode<V> {
+    pub(crate) val: V,
+    prev: usize,
+    next: usize,
 }
 
-impl<K, V> EntryNode<K, V> {
-    pub(crate) fn new(key: K, val: V) -> Self {
+impl<V> EntryNode<V> {
+    pub(crate) fn new(val: V) -> Self {
         EntryNode {
-            key: mem::MaybeUninit::new(key),
-            val: mem::MaybeUninit::new(val),
-            prev: ptr::null_mut(),
-            next: ptr::null_mut(),
-        }
-    }
-
-    fn new_sigil() -> Self {
-        EntryNode {
-            key: mem::MaybeUninit::uninit(),
-            val: mem::MaybeUninit::uninit(),
-            prev: ptr::null_mut(),
-            next: ptr::null_mut(),
+            val,
+            prev: usize::MAX,
+            next: usize::MAX,
         }
     }
 }
@@ -152,13 +141,13 @@ fn check_size(size: usize) -> Result<(), CacheError> {
 /// assert_eq!(counter.load(Ordering::SeqCst), 3);
 /// ```
 pub struct RawLRU<K, V, E = DefaultEvictCallback, S = DefaultHashBuilder> {
-    pub(crate) map: HashMap<KeyRef<K>, Box<EntryNode<K, V>>, S>,
+    pub(crate) map: IndexMap<K, EntryNode<V>, S>,
     cap: usize,
     on_evict: Option<E>,
 
-    // head and tail are sigil nodes to faciliate inserting entries
-    head: *mut EntryNode<K, V>,
-    tail: *mut EntryNode<K, V>,
+    // these are usize::MAX if empty
+    head: usize,
+    tail: usize,
 }
 
 impl<K: Hash + Eq, V> RawLRU<K, V> {
@@ -174,7 +163,7 @@ impl<K: Hash + Eq, V> RawLRU<K, V> {
         check_size(cap).map(|_| {
             Self::construct(
                 cap,
-                HashMap::with_capacity_and_hasher(cap, DefaultHashBuilder::default()),
+                IndexMap::with_capacity_and_hasher(cap, DefaultHashBuilder::default()),
                 None,
             )
         })
@@ -197,7 +186,7 @@ impl<K: Hash + Eq, V, S: BuildHasher> RawLRU<K, V, DefaultEvictCallback, S> {
         check_size(cap).map(|_| {
             Self::construct(
                 cap,
-                HashMap::with_capacity_and_hasher(cap, hash_builder),
+                IndexMap::with_capacity_and_hasher(cap, hash_builder),
                 None,
             )
         })
@@ -265,7 +254,7 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> Cache<K, V> for RawLRU
     ///
     /// [`PutResult`]: struct.PutResult.html
     fn put(&mut self, k: K, mut v: V) -> PutResult<K, V> {
-        let node_ptr = self.map.get_mut(&KeyRef { k: &k }).map(|node| {
+        let node_ptr = self.map.get_mut(&k).map(|node| {
             let node_ptr: *mut EntryNode<K, V> = &mut **node;
             node_ptr
         });
@@ -299,7 +288,7 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> Cache<K, V> for RawLRU
     /// ```
     fn get<'a, Q>(&'_ mut self, k: &'a Q) -> Option<&'a V>
     where
-        KeyRef<K>: Borrow<Q>,
+        K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         if let Some(node) = self.map.get_mut(k) {
@@ -334,7 +323,7 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> Cache<K, V> for RawLRU
     /// ```
     fn get_mut<'a, Q>(&'_ mut self, k: &'a Q) -> Option<&'a mut V>
     where
-        KeyRef<K>: Borrow<Q>,
+        K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         if let Some(node) = self.map.get_mut(k) {
@@ -367,7 +356,7 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> Cache<K, V> for RawLRU
     /// ```
     fn peek<'a, Q>(&'_ self, k: &'a Q) -> Option<&'a V>
     where
-        KeyRef<K>: Borrow<Q>,
+        K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         self.map
@@ -393,7 +382,7 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> Cache<K, V> for RawLRU
     /// ```
     fn peek_mut<'a, Q>(&'_ mut self, k: &'a Q) -> Option<&'a mut V>
     where
-        KeyRef<K>: Borrow<Q>,
+        K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         match self.map.get_mut(k) {
@@ -422,7 +411,7 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> Cache<K, V> for RawLRU
     #[inline]
     fn contains<Q>(&self, k: &Q) -> bool
     where
-        KeyRef<K>: Borrow<Q>,
+        K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         self.map.contains_key(k)
@@ -446,7 +435,7 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> Cache<K, V> for RawLRU
     /// ```
     fn remove<Q>(&mut self, k: &Q) -> Option<V>
     where
-        KeyRef<K>: Borrow<Q>,
+        K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         match self.map.remove(k) {
@@ -620,27 +609,14 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> RawLRU<K, V, E, S> {
     }
 
     /// Creates a new LRU Cache with the given capacity.
-    fn construct(
-        cap: usize,
-        map: HashMap<KeyRef<K>, Box<EntryNode<K, V>>, S>,
-        cb: Option<E>,
-    ) -> Self {
-        // NB: The compiler warns that cache does not need to be marked as mutable if we
-        // declare it as such since we only mutate it inside the unsafe block.
-        let cache = Self {
+    fn construct(cap: usize, map: IndexMap<K, EntryNode<V>, S>, cb: Option<E>) -> Self {
+        Self {
             map,
             cap,
             on_evict: cb,
-            head: Box::into_raw(Box::new(EntryNode::new_sigil())),
-            tail: Box::into_raw(Box::new(EntryNode::new_sigil())),
-        };
-
-        unsafe {
-            (*cache.head).next = cache.tail;
-            (*cache.tail).prev = cache.head;
+            head: usize::MAX,
+            tail: usize::MAX,
         }
-
-        cache
     }
 
     /// Returns the least recent used entry(&K, &V) in the cache or `None` if the cache is empty.
@@ -782,7 +758,7 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> RawLRU<K, V, E, S> {
     ///
     /// [`PutResult`]: struct.PutResult.html
     pub fn peek_or_put(&mut self, k: K, v: V) -> (Option<&V>, Option<PutResult<K, V>>) {
-        match self.map.get(&KeyRef { k: &k }) {
+        match self.map.get(&k) {
             None => (None, Some(self.put_in(k, v))),
             Some(ent) => unsafe { (Some(&*ent.val.as_ptr() as &V), None) },
         }
@@ -809,8 +785,7 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> RawLRU<K, V, E, S> {
     ///
     /// [`PutResult`]: struct.PutResult.html
     pub fn peek_mut_or_put(&mut self, k: K, v: V) -> (Option<&mut V>, Option<PutResult<K, V>>) {
-        let k_ref = KeyRef { k: &k };
-        match self.map.get_mut(&k_ref) {
+        match self.map.get_mut(&k) {
             None => (None, Some(self.put_in(k, v))),
             Some(v) => unsafe { (Some(&mut *v.val.as_mut_ptr() as &mut V), None) },
         }
@@ -957,7 +932,7 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> RawLRU<K, V, E, S> {
     ///
     /// [`PutResult`]: struct.PutResult.html
     pub fn contains_or_put(&mut self, k: K, v: V) -> (bool, Option<PutResult<K, V>>) {
-        if !self.map.contains_key(&KeyRef { k: &k }) {
+        if !self.map.contains_key(&k) {
             (false, Some(self.put_in(k, v)))
         } else {
             (true, None)
@@ -1078,7 +1053,7 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> RawLRU<K, V, E, S> {
     ///     println!("val: {}", val);
     /// }
     /// ```
-    pub fn values_lru<'a>(&'_ self) -> ValuesLRUIter<'a, K, V> {
+    pub fn values_lru<'a>(&'a self) -> ValuesLRUIter<'a, K, V, S> {
         ValuesLRUIter {
             inner: self.iter_lru(),
         }
@@ -1101,7 +1076,7 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> RawLRU<K, V, E, S> {
     ///     println!("val: {}", val);
     /// }
     /// ```
-    pub fn values_mut<'a>(&'_ mut self) -> ValuesMRUIterMut<'a, K, V> {
+    pub fn values_mut<'a>(&'a mut self) -> ValuesMRUIterMut<'a, K, V, S> {
         ValuesMRUIterMut {
             inner: self.iter_mut(),
         }
@@ -1124,7 +1099,7 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> RawLRU<K, V, E, S> {
     ///     println!("val: {}", val);
     /// }
     /// ```
-    pub fn values_lru_mut<'a>(&'_ mut self) -> ValuesLRUIterMut<'a, K, V> {
+    pub fn values_lru_mut<'a>(&'a mut self) -> ValuesLRUIterMut<'a, K, V, S> {
         ValuesLRUIterMut {
             inner: self.iter_lru_mut(),
         }
@@ -1147,12 +1122,12 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> RawLRU<K, V, E, S> {
     ///     println!("key: {} val: {}", key, val);
     /// }
     /// ```
-    pub fn iter<'a>(&'_ self) -> MRUIter<'a, K, V> {
+    pub fn iter<'a>(&'a self) -> MRUIter<'a, K, V, S> {
         MRUIter {
             len: self.len(),
-            ptr: unsafe { (*self.head).next },
-            end: unsafe { (*self.tail).prev },
-            phantom: PhantomData,
+            index: self.head,
+            end: self.tail,
+            map: &self.map,
         }
     }
 
@@ -1173,13 +1148,8 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> RawLRU<K, V, E, S> {
     ///     println!("key: {} val: {}", key, val);
     /// }
     /// ```
-    pub fn iter_lru<'a>(&'_ self) -> LRUIter<'a, K, V> {
-        LRUIter {
-            len: self.len(),
-            ptr: unsafe { (*self.head).next },
-            end: unsafe { (*self.tail).prev },
-            phantom: PhantomData,
-        }
+    pub fn iter_lru<'a>(&'a self) -> LRUIter<'a, K, V, S> {
+        self.iter().rev()
     }
 
     /// An iterator visiting all entries in most-recently-used order, giving a mutable reference on
@@ -1208,12 +1178,12 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> RawLRU<K, V, E, S> {
     ///     }
     /// }
     /// ```
-    pub fn iter_mut<'a>(&'_ mut self) -> MRUIterMut<'a, K, V> {
+    pub fn iter_mut<'a>(&'a mut self) -> MRUIterMut<'a, K, V, S> {
         MRUIterMut {
             len: self.len(),
-            ptr: unsafe { (*self.head).next },
-            end: unsafe { (*self.tail).prev },
-            phantom: PhantomData,
+            index: self.head,
+            end: self.tail,
+            map: &mut self.map,
         }
     }
 
@@ -1243,12 +1213,8 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> RawLRU<K, V, E, S> {
     ///     }
     /// }
     /// ```
-    pub fn iter_lru_mut<'a>(&'_ mut self) -> LRUIterMut<'a, K, V> {
+    pub fn iter_lru_mut<'a>(&'a mut self) -> LRUIterMut<'a, K, V> {
         LRUIterMut {
-            len: self.len(),
-            ptr: unsafe { (*self.head).next },
-            end: unsafe { (*self.tail).prev },
-            phantom: PhantomData,
         }
     }
 
@@ -1260,20 +1226,18 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> RawLRU<K, V, E, S> {
                 self.detach(node);
 
                 // Safety: the node is in cache, so the cache map must have the node.
-                let node = self
+                let node = match self
                     .map
-                    .remove(&KeyRef {
-                        k: node.key.as_ptr(),
-                    })
-                    .unwrap();
+                    .raw_entry_mut()
+                    .from_key(unsafe { node.key.assume_init_ref() })
+                {
+                    RawEntryMut::Occupied(entry) => entry.remove_entry().0,
+                    RawEntryMut::Vacant(_) => panic!("node must be in the cache"),
+                };
 
                 self.attach(bks.as_mut());
-                self.map.insert(
-                    KeyRef {
-                        k: bks.key.as_ptr(),
-                    },
-                    bks,
-                );
+                let key = unsafe { bks.key.assume_init_ref() };
+                self.map.raw_entry_mut().from_key(key).insert(bks, ());
 
                 PutResult::Evicted {
                     key: node.key.assume_init(),
@@ -1285,7 +1249,7 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> RawLRU<K, V, E, S> {
             self.attach(node_ptr);
 
             let keyref = unsafe { (*node_ptr).key.as_ptr() };
-            self.map.insert(KeyRef { k: keyref }, bks);
+            self.map.insert(keyref, bks);
             PutResult::Put
         }
     }
@@ -1374,7 +1338,7 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> RawLRU<K, V, E, S> {
 
     pub(crate) fn remove_and_return_ent<Q>(&mut self, k: &Q) -> Option<Box<EntryNode<K, V>>>
     where
-        KeyRef<K>: Borrow<Q>,
+        K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         match self.map.remove(k) {
@@ -1408,19 +1372,30 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> RawLRU<K, V, E, S> {
         }
     }
 
-    pub(crate) fn detach(&mut self, node: *mut EntryNode<K, V>) {
-        unsafe {
-            (*(*node).prev).next = (*node).next;
-            (*(*node).next).prev = (*node).prev;
+    pub(crate) fn detach(&mut self, node: &EntryNode<V>) {
+        if node.prev == usize::MAX {
+            self.head = node.next;
+        } else {
+            self.map.get_index_mut(node.prev).unwrap().1.next = node.next;
+        }
+        if node.next == usize::MAX {
+            self.tail = node.prev;
+        } else {
+            self.map.get_index_mut(node.next).unwrap().1.prev = node.prev;
         }
     }
 
-    pub(crate) fn attach(&mut self, node: *mut EntryNode<K, V>) {
-        unsafe {
-            (*node).next = (*self.head).next;
-            (*node).prev = self.head;
-            (*self.head).next = node;
-            (*(*node).next).prev = node;
+    pub(crate) fn attach(&mut self, node: &mut EntryNode<V>, node_index: usize) {
+        if self.head == usize::MAX {
+            // empty case
+            node.next = usize::MAX;
+            node.prev = usize::MAX;
+            self.head = node_index;
+            self.tail = node_index;
+        } else {
+            node.prev = usize::MAX;
+            node.next = self.head;
+            self.head = node_index;
         }
     }
 
@@ -1432,28 +1407,13 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> RawLRU<K, V, E, S> {
     }
 }
 
-impl<K, V, E, S> Drop for RawLRU<K, V, E, S> {
-    fn drop(&mut self) {
-        self.map.values_mut().for_each(|e| unsafe {
-            ptr::drop_in_place(e.key.as_mut_ptr());
-            ptr::drop_in_place(e.val.as_mut_ptr());
-        });
-        // We rebox the head/tail, and because these are maybe-uninit
-        // they do not have the absent k/v dropped.
-        unsafe {
-            let _head = *Box::from_raw(self.head);
-            let _tail = *Box::from_raw(self.tail);
-        }
-    }
-}
-
 impl<'a, K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> IntoIterator
     for &'a RawLRU<K, V, E, S>
 {
     type Item = (&'a K, &'a V);
-    type IntoIter = MRUIter<'a, K, V>;
+    type IntoIter = MRUIter<'a, K, V, S>;
 
-    fn into_iter(self) -> MRUIter<'a, K, V> {
+    fn into_iter(self) -> MRUIter<'a, K, V, S> {
         self.iter()
     }
 }
@@ -1462,9 +1422,9 @@ impl<'a, K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> IntoIterator
     for &'a mut RawLRU<K, V, E, S>
 {
     type Item = (&'a K, &'a mut V);
-    type IntoIter = MRUIterMut<'a, K, V>;
+    type IntoIter = MRUIterMut<'a, K, V, S>;
 
-    fn into_iter(self) -> MRUIterMut<'a, K, V> {
+    fn into_iter(self) -> MRUIterMut<'a, K, V, S> {
         self.iter_mut()
     }
 }
@@ -1523,12 +1483,6 @@ impl_rawlru_from_kv_collections! (
     BTreeMap<K, V>
 );
 
-// The compiler does not automatically derive Send and Sync for RawLRU because it contains
-// raw pointers. The raw pointers are safely encapsulated by RawLRU though so we can
-// implement Send and Sync for it below.
-unsafe impl<K: Send, V: Send, E: Send, S: Send> Send for RawLRU<K, V, E, S> {}
-unsafe impl<K: Sync, V: Sync, E: Send, S: Sync> Sync for RawLRU<K, V, E, S> {}
-
 impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> fmt::Debug for RawLRU<K, V, E, S> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("RawLRU")
@@ -1545,16 +1499,14 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> fmt::Debug for RawLRU<
 ///////////////////////////////////////////////////////////////////////////////////////////
 
 /// An iterator over the entries, from most recent used to less recent used.
-pub struct MRUIter<'a, K: 'a, V: 'a> {
+pub struct MRUIter<'a, K: 'a, V: 'a, S> {
     len: usize,
-
-    ptr: *const EntryNode<K, V>,
-    end: *const EntryNode<K, V>,
-
-    phantom: PhantomData<&'a K>,
+    index: usize,
+    end: usize,
+    map: &'a IndexMap<K, EntryNode<V>, S>,
 }
 
-impl<'a, K, V> Iterator for MRUIter<'a, K, V> {
+impl<'a, K, V, S> Iterator for MRUIter<'a, K, V, S> {
     type Item = (&'a K, &'a V);
 
     fn next(&mut self) -> Option<(&'a K, &'a V)> {
@@ -1562,13 +1514,15 @@ impl<'a, K, V> Iterator for MRUIter<'a, K, V> {
             return None;
         }
 
-        let key = unsafe { &(*(*self.ptr).key.as_ptr()) as &K };
-        let val = unsafe { &(*(*self.ptr).val.as_ptr()) as &V };
+        let (key, entry) = self
+            .map
+            .get_index(self.index)
+            .expect("index must exist in map");
 
         self.len -= 1;
-        self.ptr = unsafe { (*self.ptr).next };
+        self.index = entry.next;
 
-        Some((key, val))
+        Some((key, &entry.val))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -1580,85 +1534,35 @@ impl<'a, K, V> Iterator for MRUIter<'a, K, V> {
     }
 }
 
-impl<'a, K, V> DoubleEndedIterator for MRUIter<'a, K, V> {
+impl<'a, K, V, S> DoubleEndedIterator for MRUIter<'a, K, V, S> {
     fn next_back(&mut self) -> Option<(&'a K, &'a V)> {
         if self.len == 0 {
             return None;
         }
 
-        let key = unsafe { &(*(*self.end).key.as_ptr()) as &K };
-        let val = unsafe { &(*(*self.end).val.as_ptr()) as &V };
+        let (key, entry) = self
+            .map
+            .get_index(self.end)
+            .expect("index must exist in map");
 
         self.len -= 1;
-        self.end = unsafe { (*self.end).prev };
+        self.end = entry.prev;
 
-        Some((key, val))
+        Some((key, &entry.val))
     }
 }
 
-/// An iterator over the entries from less recent used to most recent used.
-pub struct LRUIter<'a, K: 'a, V: 'a> {
-    len: usize,
-
-    ptr: *const EntryNode<K, V>,
-    end: *const EntryNode<K, V>,
-
-    phantom: PhantomData<&'a K>,
-}
-
-impl<'a, K, V> Iterator for LRUIter<'a, K, V> {
-    type Item = (&'a K, &'a V);
-
-    fn next(&mut self) -> Option<(&'a K, &'a V)> {
-        if self.len == 0 {
-            return None;
-        }
-
-        let key = unsafe { &(*(*self.end).key.as_ptr()) as &K };
-        let val = unsafe { &(*(*self.end).val.as_ptr()) as &V };
-
-        self.len -= 1;
-        self.end = unsafe { (*self.end).prev };
-
-        Some((key, val))
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.len, Some(self.len))
-    }
-
-    fn count(self) -> usize {
-        self.len
-    }
-}
-
-impl<'a, K, V> DoubleEndedIterator for LRUIter<'a, K, V> {
-    fn next_back(&mut self) -> Option<(&'a K, &'a V)> {
-        if self.len == 0 {
-            return None;
-        }
-
-        let key = unsafe { &(*(*self.ptr).key.as_ptr()) as &K };
-        let val = unsafe { &(*(*self.ptr).val.as_ptr()) as &V };
-
-        self.len -= 1;
-        self.ptr = unsafe { (*self.ptr).next };
-
-        Some((key, val))
-    }
-}
+pub type LRUIter<'a, K: 'a, V: 'a, S> = Rev<MRUIter<'a, K, V, S>>;
 
 /// An iterator over mutable entries, from most recent used to less recent used.
-pub struct MRUIterMut<'a, K: 'a, V: 'a> {
+pub struct MRUIterMut<'a, K: 'a, V: 'a, S> {
     len: usize,
-
-    ptr: *mut EntryNode<K, V>,
-    end: *mut EntryNode<K, V>,
-
-    phantom: PhantomData<&'a K>,
+    index: usize,
+    end: usize,
+    map: &'a mut IndexMap<K, EntryNode<V>, S>,
 }
 
-impl<'a, K, V> Iterator for MRUIterMut<'a, K, V> {
+impl<'a, K, V, S> Iterator for MRUIterMut<'a, K, V, S> {
     type Item = (&'a K, &'a mut V);
 
     fn next(&mut self) -> Option<(&'a K, &'a mut V)> {
@@ -1666,13 +1570,15 @@ impl<'a, K, V> Iterator for MRUIterMut<'a, K, V> {
             return None;
         }
 
-        let key = unsafe { &mut (*(*self.ptr).key.as_mut_ptr()) as &mut K };
-        let val = unsafe { &mut (*(*self.ptr).val.as_mut_ptr()) as &mut V };
+        let (key, entry) = self
+            .map
+            .get_index_mut(self.index)
+            .expect("index must exist in map");
 
         self.len -= 1;
-        self.ptr = unsafe { (*self.ptr).next };
+        self.index = entry.next;
 
-        Some((key, val))
+        Some((key, &mut entry.val))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -1684,125 +1590,60 @@ impl<'a, K, V> Iterator for MRUIterMut<'a, K, V> {
     }
 }
 
-impl<'a, K, V> DoubleEndedIterator for MRUIterMut<'a, K, V> {
+impl<'a, K, V, S> DoubleEndedIterator for MRUIterMut<'a, K, V, S> {
     fn next_back(&mut self) -> Option<(&'a K, &'a mut V)> {
         if self.len == 0 {
             return None;
         }
 
-        let key = unsafe { &mut (*(*self.end).key.as_mut_ptr()) as &mut K };
-        let val = unsafe { &mut (*(*self.end).val.as_mut_ptr()) as &mut V };
+        let (key, entry) = self
+            .map
+            .get_index_mut(self.end)
+            .expect("index must exist in map");
 
         self.len -= 1;
-        self.end = unsafe { (*self.end).prev };
+        self.end = entry.prev;
 
-        Some((key, val))
+        Some((key, &mut entry.val))
     }
 }
 
-/// An iterator over mutable entries, from less recent used to most recent used.
-pub struct LRUIterMut<'a, K: 'a, V: 'a> {
-    len: usize,
-
-    ptr: *mut EntryNode<K, V>,
-    end: *mut EntryNode<K, V>,
-
-    phantom: PhantomData<&'a K>,
-}
-
-impl<'a, K, V> Iterator for LRUIterMut<'a, K, V> {
-    type Item = (&'a K, &'a mut V);
-
-    fn next(&mut self) -> Option<(&'a K, &'a mut V)> {
-        if self.len == 0 {
-            return None;
-        }
-
-        let key = unsafe { &mut (*(*self.end).key.as_mut_ptr()) as &mut K };
-        let val = unsafe { &mut (*(*self.end).val.as_mut_ptr()) as &mut V };
-
-        self.len -= 1;
-        self.end = unsafe { (*self.end).prev };
-
-        Some((key, val))
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.len, Some(self.len))
-    }
-
-    fn count(self) -> usize {
-        self.len
-    }
-}
-
-impl<'a, K, V> DoubleEndedIterator for LRUIterMut<'a, K, V> {
-    fn next_back(&mut self) -> Option<(&'a K, &'a mut V)> {
-        if self.len == 0 {
-            return None;
-        }
-
-        let key = unsafe { &mut (*(*self.ptr).key.as_mut_ptr()) as &mut K };
-        let val = unsafe { &mut (*(*self.ptr).val.as_mut_ptr()) as &mut V };
-
-        self.len -= 1;
-        self.ptr = unsafe { (*self.ptr).next };
-
-        Some((key, val))
-    }
-}
+pub type LRUIterMut<'a, K: 'a, V: 'a, S> = Rev<MRUIterMut<'a, K, V, S>>;
 
 /// An iterator over entries, from most recent used to less recent used.
-pub struct KeysMRUIter<'a, K, V> {
-    inner: MRUIter<'a, K, V>,
+pub struct KeysMRUIter<'a, K, V, S> {
+    inner: MRUIter<'a, K, V, S>,
 }
 
 /// An iterator over entries, from less recent used to most recent used.
-pub struct KeysLRUIter<'a, K, V> {
-    inner: LRUIter<'a, K, V>,
+pub struct KeysLRUIter<'a, K, V, S> {
+    inner: LRUIter<'a, K, V, S>,
 }
 
 /// An iterator over entries, from most recent used to less recent used.
-pub struct ValuesMRUIter<'a, K, V> {
-    inner: MRUIter<'a, K, V>,
+pub struct ValuesMRUIter<'a, K, V, S> {
+    inner: MRUIter<'a, K, V, S>,
 }
 
 /// An iterator over mutable entries, from most recent used to less recent used.
-pub struct ValuesMRUIterMut<'a, K: 'a, V: 'a> {
-    inner: MRUIterMut<'a, K, V>,
+pub struct ValuesMRUIterMut<'a, K: 'a, V: 'a, S> {
+    inner: MRUIterMut<'a, K, V, S>,
 }
 
 /// An iterator over entries, from less recent used to most recent used.
-pub struct ValuesLRUIter<'a, K: 'a, V: 'a> {
-    inner: LRUIter<'a, K, V>,
+pub struct ValuesLRUIter<'a, K: 'a, V: 'a, S> {
+    inner: LRUIter<'a, K, V, S>,
 }
 
 /// An iterator over mutable entries, from less recent used to most recent used.
-pub struct ValuesLRUIterMut<'a, K: 'a, V: 'a> {
-    inner: LRUIterMut<'a, K, V>,
-}
-
-macro_rules! impl_clone_for_basic_iterator {
-    ($($t:ty),*) => {
-        $(
-            impl<'a, K, V> Clone for $t {
-                fn clone(&self) -> Self {
-                    Self {
-                        len: self.len,
-                        ptr: self.ptr,
-                        end: self.end,
-                        phantom: PhantomData,
-                    }
-                }
-            }
-        )*
-    }
+pub struct ValuesLRUIterMut<'a, K: 'a, V: 'a, S> {
+    inner: LRUIterMut<'a, K, V, S>,
 }
 
 macro_rules! impl_clone_for_kv_iterator {
     ($($t:ty),*) => {
         $(
-            impl<K: Clone, V: Clone> Clone for $t {
+            impl<K, V, S> Clone for $t {
                 fn clone(&self) -> Self {
                     Self {
                         inner: self.inner.clone(),
@@ -1816,7 +1657,7 @@ macro_rules! impl_clone_for_kv_iterator {
 macro_rules! impl_keys_iterator {
     ($($t:ty),*) => {
         $(
-            impl<'a, K, V> Iterator for $t {
+            impl<'a, K, V, S> Iterator for $t {
                 type Item = &'a K;
 
                 fn next(&mut self) -> Option<Self::Item> {
@@ -1832,7 +1673,7 @@ macro_rules! impl_keys_iterator {
                 }
             }
 
-            impl<'a, K, V> DoubleEndedIterator for $t {
+            impl<'a, K, V, S> DoubleEndedIterator for $t {
                 fn next_back(&mut self) -> Option<Self::Item> {
                     self.inner.next_back().map(|(k, _)| k)
                 }
@@ -1844,7 +1685,7 @@ macro_rules! impl_keys_iterator {
 macro_rules! impl_values_iterator {
     ($($t:ty),*) => {
         $(
-            impl<'a, K, V> Iterator for $t {
+            impl<'a, K, V, S> Iterator for $t {
                 type Item = &'a V;
 
                 fn next(&mut self) -> Option<Self::Item> {
@@ -1860,7 +1701,7 @@ macro_rules! impl_values_iterator {
                 }
             }
 
-            impl<'a, K, V> DoubleEndedIterator for $t {
+            impl<'a, K, V, S> DoubleEndedIterator for $t {
                 fn next_back(&mut self) -> Option<Self::Item> {
                     self.inner.next_back().map(|(_, v)| v)
                 }
@@ -1872,7 +1713,7 @@ macro_rules! impl_values_iterator {
 macro_rules! impl_values_mut_iterator {
     ($($t:ty),*) => {
         $(
-            impl<'a, K, V> Iterator for $t {
+            impl<'a, K, V, S> Iterator for $t {
                 type Item = &'a mut V;
 
                 fn next(&mut self) -> Option<Self::Item> {
@@ -1888,7 +1729,7 @@ macro_rules! impl_values_mut_iterator {
                 }
             }
 
-            impl<'a, K, V> DoubleEndedIterator for $t {
+            impl<'a, K, V, S> DoubleEndedIterator for $t {
                 fn next_back(&mut self) -> Option<Self::Item> {
                     self.inner.next_back().map(|(_, v)| v)
                 }
@@ -1900,74 +1741,54 @@ macro_rules! impl_values_mut_iterator {
 macro_rules! impl_exact_size_and_fused_iterator {
     ($($t:ty),*) => {
         $(
-            impl<'a, K, V> ExactSizeIterator for $t {}
-            impl<'a, K, V> FusedIterator for $t {}
+            impl<'a, K, V, S> ExactSizeIterator for $t {}
+            impl<'a, K, V, S> FusedIterator for $t {}
         )*
     }
 }
 
-macro_rules! impl_send_and_sync_for_iterator {
-    ($($t:ty),*) => {
-        $(
-            // The compiler does not automatically derive Send and Sync for Iter because it contains
-            // raw pointers.
-            unsafe impl<'a, K: Send, V: Send> Send for $t {}
-            unsafe impl<'a, K: Sync, V: Sync> Sync for $t {}
-        )*
+impl<'a, K, V, S> Clone for MRUIter<'a, K, V, S> {
+    fn clone(&self) -> Self {
+        Self {
+            len: self.len,
+            index: self.index,
+            end: self.end,
+            map: self.map,
+        }
     }
-}
-
-impl_clone_for_basic_iterator! {
-    MRUIter<'a, K, V>,
-    LRUIter<'a, K, V>
 }
 
 impl_clone_for_kv_iterator! {
-    KeysMRUIter<'_, K, V>,
-    KeysLRUIter<'_, K, V>,
-    ValuesMRUIter<'_, K, V>,
-    ValuesLRUIter<'_, K, V>
+    KeysMRUIter<'_, K, V, S>,
+    KeysLRUIter<'_, K, V, S>,
+    ValuesMRUIter<'_, K, V, S>,
+    ValuesLRUIter<'_, K, V, S>
 }
 
 impl_keys_iterator! {
-    KeysMRUIter<'a, K, V>,
-    KeysLRUIter<'a, K, V>
+    KeysMRUIter<'a, K, V, S>,
+    KeysLRUIter<'a, K, V, S>
 }
 
 impl_values_iterator! {
-    ValuesMRUIter<'a, K, V>,
-    ValuesLRUIter<'a, K, V>
+    ValuesMRUIter<'a, K, V, S>,
+    ValuesLRUIter<'a, K, V, S>
 }
 
 impl_values_mut_iterator! {
-    ValuesMRUIterMut<'a, K, V>,
-    ValuesLRUIterMut<'a, K, V>
+    ValuesMRUIterMut<'a, K, V, S>,
+    ValuesLRUIterMut<'a, K, V, S>
 }
 
 impl_exact_size_and_fused_iterator! {
-    MRUIter<'a, K, V>,
-    LRUIter<'a, K, V>,
-    MRUIterMut<'a, K, V>,
-    LRUIterMut<'a, K, V>,
-    KeysMRUIter<'a, K, V>,
-    KeysLRUIter<'a, K, V>,
-    ValuesMRUIter<'a, K, V>,
-    ValuesMRUIterMut<'a, K, V>,
-    ValuesLRUIter<'a, K, V>,
-    ValuesLRUIterMut<'a, K, V>
-}
-
-impl_send_and_sync_for_iterator! {
-    MRUIter<'a, K, V>,
-    LRUIter<'a, K, V>,
-    MRUIterMut<'a, K, V>,
-    LRUIterMut<'a, K, V>,
-    KeysMRUIter<'a, K, V>,
-    KeysLRUIter<'a, K, V>,
-    ValuesMRUIter<'a, K, V>,
-    ValuesMRUIterMut<'a, K, V>,
-    ValuesLRUIter<'a, K, V>,
-    ValuesLRUIterMut<'a, K, V>
+    MRUIter<'a, K, V, S>,
+    MRUIterMut<'a, K, V, S>,
+    KeysMRUIter<'a, K, V, S>,
+    KeysLRUIter<'a, K, V, S>,
+    ValuesMRUIter<'a, K, V, S>,
+    ValuesMRUIterMut<'a, K, V, S>,
+    ValuesLRUIter<'a, K, V, S>,
+    ValuesLRUIterMut<'a, K, V, S>
 }
 
 #[cfg(test)]
@@ -1977,8 +1798,8 @@ mod tests {
     use crate::{Cache, PutResult, ResizableCache};
     use alloc::collections::BTreeMap;
     use core::fmt::Debug;
+    use hashbrown::HashMap;
     use scoped_threadpool::Pool;
-    use std::collections::HashMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn assert_opt_eq<V: PartialEq + Debug>(opt: Option<&V>, v: V) {

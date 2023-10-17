@@ -115,12 +115,6 @@ pub use cache_api::{Cache, ResizableCache};
 pub mod lfu;
 pub use lfu::{WTinyLFUCache, WTinyLFUCacheBuilder};
 
-#[cfg(feature = "std")]
-use std::collections::{HashMap, HashSet};
-
-#[cfg(not(feature = "std"))]
-use hashbrown::{HashMap, HashSet};
-
 #[macro_use]
 mod macros;
 
@@ -132,75 +126,6 @@ cfg_not_std!(
 cfg_std!(
     /// Re-export for DefaultHashBuilder
     pub type DefaultHashBuilder = std::collections::hash_map::RandomState;
-);
-
-// Struct used to hold a reference to a key
-#[doc(hidden)]
-pub struct KeyRef<K> {
-    k: *const K,
-}
-
-impl<K: Hash> Hash for KeyRef<K> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        unsafe { (*self.k).hash(state) }
-    }
-}
-
-impl<K: PartialEq> PartialEq for KeyRef<K> {
-    fn eq(&self, other: &KeyRef<K>) -> bool {
-        unsafe { (*self.k).eq(&*other.k) }
-    }
-}
-
-impl<K: Eq> Eq for KeyRef<K> {}
-
-#[cfg(not(feature = "nightly"))]
-mod sealed {
-    use super::KeyRef;
-    use alloc::boxed::Box;
-    use alloc::string::String;
-    use alloc::vec::Vec;
-    use core::borrow::Borrow;
-
-    impl<T> Borrow<[T]> for KeyRef<Vec<T>> {
-        fn borrow(&self) -> &[T] {
-            unsafe { (*self.k).borrow() }
-        }
-    }
-
-    impl<T: ?Sized> Borrow<T> for KeyRef<Box<T>> {
-        fn borrow(&self) -> &T {
-            unsafe { (*self.k).borrow() }
-        }
-    }
-
-    impl Borrow<str> for KeyRef<String> {
-        fn borrow(&self) -> &str {
-            unsafe { (*self.k).borrow() }
-        }
-    }
-}
-
-cfg_nightly_hidden_doc!(
-    pub auto trait NotKeyRef {}
-    impl<K> !NotKeyRef for KeyRef<K> {}
-    impl<K, D> Borrow<D> for KeyRef<K>
-    where
-        K: Borrow<D>,
-        D: NotKeyRef + ?Sized,
-    {
-        fn borrow(&self) -> &D {
-            unsafe { &*self.k }.borrow()
-        }
-    }
-);
-
-cfg_not_nightly!(
-    impl<K> Borrow<K> for KeyRef<K> {
-        fn borrow(&self) -> &K {
-            unsafe { &*self.k }
-        }
-    }
 );
 
 /// `DefaultEvictCallback` is a noop evict callback.

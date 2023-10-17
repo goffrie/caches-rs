@@ -1,5 +1,5 @@
 use crate::lru::{debox, swap_value, CacheError, RawLRU};
-use crate::{Cache, DefaultEvictCallback, DefaultHashBuilder, KeyRef, PutResult};
+use crate::{Cache, DefaultEvictCallback, DefaultHashBuilder, PutResult};
 use core::borrow::Borrow;
 use core::hash::{BuildHasher, Hash};
 
@@ -303,7 +303,7 @@ impl<K: Hash + Eq, V, FH: BuildHasher, RH: BuildHasher> SegmentedCache<K, V, FH,
 
     fn move_to_protected<T, Q>(&mut self, k: &Q, v: T) -> Option<T>
     where
-        KeyRef<K>: Borrow<Q>,
+        K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         // remove the element from the probationary LRU
@@ -345,13 +345,11 @@ impl<K: Hash + Eq, V, FH: BuildHasher, RH: BuildHasher> Cache<K, V>
     ///
     /// [`PutResult`]: struct.PutResult.html
     fn put(&mut self, k: K, mut v: V) -> PutResult<K, V> {
-        let key_ref = KeyRef { k: &k };
-
         // check if the value is already in protected segment and update it
         if let Some(ent_ptr) = self
             .protected
             .map
-            .get_mut(&key_ref)
+            .get_mut(&k)
             .map(|bks| debox::<K, V>(bks))
         {
             self.protected.update(&mut v, ent_ptr);
@@ -359,10 +357,10 @@ impl<K: Hash + Eq, V, FH: BuildHasher, RH: BuildHasher> Cache<K, V>
         }
 
         // check if the value is already in probationary segment and move it to protected segment
-        if self.probationary.contains(&key_ref) {
+        if self.probationary.contains(&k) {
             return self
                 .probationary
-                .remove_and_return_ent(&key_ref)
+                .remove_and_return_ent(&k)
                 .and_then(|mut ent| {
                     let ent_ptr = ent.as_mut();
                     unsafe {
@@ -397,7 +395,7 @@ impl<K: Hash + Eq, V, FH: BuildHasher, RH: BuildHasher> Cache<K, V>
     /// ```
     fn get<'a, Q>(&mut self, k: &'a Q) -> Option<&'a V>
     where
-        KeyRef<K>: Borrow<Q>,
+        K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         self.protected
@@ -433,7 +431,7 @@ impl<K: Hash + Eq, V, FH: BuildHasher, RH: BuildHasher> Cache<K, V>
     /// ```
     fn get_mut<'a, Q>(&mut self, k: &'a Q) -> Option<&'a mut V>
     where
-        KeyRef<K>: Borrow<Q>,
+        K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         self.protected
@@ -469,7 +467,7 @@ impl<K: Hash + Eq, V, FH: BuildHasher, RH: BuildHasher> Cache<K, V>
     /// ```
     fn peek<'a, Q>(&self, k: &'a Q) -> Option<&'a V>
     where
-        KeyRef<K>: Borrow<Q>,
+        K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         self.protected.peek(k).or_else(|| self.probationary.peek(k))
@@ -493,7 +491,7 @@ impl<K: Hash + Eq, V, FH: BuildHasher, RH: BuildHasher> Cache<K, V>
     /// ```
     fn peek_mut<'a, Q>(&mut self, k: &'a Q) -> Option<&'a mut V>
     where
-        KeyRef<K>: Borrow<Q>,
+        K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         self.protected
@@ -520,7 +518,7 @@ impl<K: Hash + Eq, V, FH: BuildHasher, RH: BuildHasher> Cache<K, V>
     /// ```
     fn contains<Q>(&self, k: &Q) -> bool
     where
-        KeyRef<K>: Borrow<Q>,
+        K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         self.protected.contains(k) || self.probationary.contains(k)
@@ -545,7 +543,7 @@ impl<K: Hash + Eq, V, FH: BuildHasher, RH: BuildHasher> Cache<K, V>
     /// ```
     fn remove<Q>(&mut self, k: &Q) -> Option<V>
     where
-        KeyRef<K>: Borrow<Q>,
+        K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         self.probationary

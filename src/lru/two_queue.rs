@@ -559,7 +559,7 @@ impl<K: Hash + Eq, V, RH: BuildHasher, FH: BuildHasher, GH: BuildHasher> Cache<K
     /// ```
     fn get<'a, Q>(&mut self, k: &'a Q) -> Option<&'a V>
     where
-        KeyRef<K>: Borrow<Q>,
+        K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         // Check if this is a frequent value
@@ -590,7 +590,7 @@ impl<K: Hash + Eq, V, RH: BuildHasher, FH: BuildHasher, GH: BuildHasher> Cache<K
     /// ```
     fn get_mut<'a, Q>(&mut self, k: &'a Q) -> Option<&'a mut V>
     where
-        KeyRef<K>: Borrow<Q>,
+        K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         // Check if this is a frequent value
@@ -619,7 +619,7 @@ impl<K: Hash + Eq, V, RH: BuildHasher, FH: BuildHasher, GH: BuildHasher> Cache<K
     /// ```
     fn peek<'a, Q>(&self, k: &'a Q) -> Option<&'a V>
     where
-        KeyRef<K>: Borrow<Q>,
+        K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         self.frequent.peek(k).or_else(|| self.recent.peek(k))
@@ -643,7 +643,7 @@ impl<K: Hash + Eq, V, RH: BuildHasher, FH: BuildHasher, GH: BuildHasher> Cache<K
     /// ```
     fn peek_mut<'a, Q>(&mut self, k: &'a Q) -> Option<&'a mut V>
     where
-        KeyRef<K>: Borrow<Q>,
+        K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         self.frequent
@@ -669,7 +669,7 @@ impl<K: Hash + Eq, V, RH: BuildHasher, FH: BuildHasher, GH: BuildHasher> Cache<K
     /// ```
     fn remove<Q>(&mut self, k: &Q) -> Option<V>
     where
-        KeyRef<K>: Borrow<Q>,
+        K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         self.frequent
@@ -697,7 +697,7 @@ impl<K: Hash + Eq, V, RH: BuildHasher, FH: BuildHasher, GH: BuildHasher> Cache<K
     /// ```
     fn contains<Q>(&self, k: &Q) -> bool
     where
-        KeyRef<K>: Borrow<Q>,
+        K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         self.frequent.contains(k) || self.recent.contains(k)
@@ -1562,7 +1562,7 @@ impl<K: Hash + Eq, V, RH: BuildHasher, FH: BuildHasher, GH: BuildHasher>
 
     fn move_to_frequent<T, Q>(&mut self, k: &Q, v: T) -> Option<T>
     where
-        KeyRef<K>: Borrow<Q>,
+        K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         // remove the element from the recent LRU
