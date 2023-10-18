@@ -345,7 +345,7 @@ impl<K: Hash + Eq, V, FH: BuildHasher, RH: BuildHasher> Cache<K, V>
     /// ```
     ///
     /// [`PutResult`]: struct.PutResult.html
-    fn put(&mut self, k: K, mut v: V) -> PutResult<K, V> {
+    fn put(&mut self, k: K, v: V) -> PutResult<K, V> {
         // check if the value is already in protected segment and update it
         if let Some(index) = self.protected.map.get_index_of(&k) {
             return PutResult::Update(self.protected.update(v, index));
@@ -386,14 +386,12 @@ impl<K: Hash + Eq, V, FH: BuildHasher, RH: BuildHasher> Cache<K, V>
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        match self
-            .protected
-            // already in protected LRU, we move it to the front
-            .get(k)
-        {
-            Some(x) => return Some(x),
-            None => {}
+        if let Some(index) = self.protected.get_index_of(k) {
+            // already in protected LRU, we move it to the front.
+            // indirection through `index` needed to avoid rust-lang/rust#54663
+            return Some(&self.protected.map.get_index(index).unwrap().1.val);
         }
+
         // we find the element in probationary LRU
         // remove the element from the probationary LRU
         // and put it in protected LRU.
@@ -421,19 +419,15 @@ impl<K: Hash + Eq, V, FH: BuildHasher, RH: BuildHasher> Cache<K, V>
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        match self
-            .protected
+        if let Some(index) = self.protected.get_index_of(k) {
             // already in protected LRU, we move it to the front
-            .get_mut(k)
-        {
-            Some(x) => Some(x),
-            None => {
-                // we find the element in probationary LRU
-                // remove the element from the probationary LRU
-                // and put it in protected LRU.
-                self.move_to_protected(k)
-            }
+            // indirection through `index` needed to avoid rust-lang/rust#54663
+            return Some(&mut self.protected.map.get_index_mut(index).unwrap().1.val);
         }
+        // we find the element in probationary LRU
+        // remove the element from the probationary LRU
+        // and put it in protected LRU.
+        self.move_to_protected(k)
     }
 
     /// Returns a reference to the value corresponding to the key in the cache or `None` if it is

@@ -95,20 +95,18 @@
 
 extern crate alloc;
 
-#[cfg(not(feature = "std"))]
-extern crate hashbrown;
-
 #[cfg(any(test, feature = "std"))]
 extern crate std;
 
-use core::borrow::Borrow;
 use core::fmt::{Debug, Formatter};
-use core::hash::{Hash, Hasher};
 
 pub mod lru;
 pub use lru::{
     // AdaptiveCache, AdaptiveCacheBuilder,
-    LRUCache, RawLRU, SegmentedCache, SegmentedCacheBuilder,
+    LRUCache,
+    RawLRU,
+    SegmentedCache,
+    SegmentedCacheBuilder,
     // TwoQueueCache, TwoQueueCacheBuilder,
 };
 

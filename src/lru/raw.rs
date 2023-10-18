@@ -24,7 +24,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 use alloc::borrow::Borrow;
-use alloc::boxed::Box;
+
 use alloc::collections::{BTreeMap, BTreeSet, BinaryHeap, LinkedList, VecDeque};
 use alloc::vec::Vec;
 use core::hash::{BuildHasher, Hash};
@@ -256,7 +256,7 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> Cache<K, V> for RawLRU
     /// ```
     ///
     /// [`PutResult`]: struct.PutResult.html
-    fn put(&mut self, k: K, mut v: V) -> PutResult<K, V> {
+    fn put(&mut self, k: K, v: V) -> PutResult<K, V> {
         match self.map.get_index_of(&k) {
             Some(index) => PutResult::Update(self.update(v, index)),
             None => self.put_in_result(k, v),
@@ -286,10 +286,7 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> Cache<K, V> for RawLRU
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        if let Some(index) = self.map.get_index_of(k) {
-            self.detach(index);
-            self.attach(index);
-
+        if let Some(index) = self.get_index_of(k) {
             Some(&self.map.get_index(index).unwrap().1.val)
         } else {
             None
@@ -710,6 +707,21 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> RawLRU<K, V, E, S> {
         }
     }
 
+    pub(crate) fn get_index_of<Q>(&mut self, k: &Q) -> Option<usize>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        if let Some(index) = self.map.get_index_of(k) {
+            self.detach(index);
+            self.attach(index);
+
+            Some(index)
+        } else {
+            None
+        }
+    }
+
     /// `peek_or_put` peeks if a key is in the cache without updating the
     /// recent-ness or deleting it for being stale, and if not, adds the value.
     /// Returns whether found and whether a [`PutResult`].
@@ -731,9 +743,10 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> RawLRU<K, V, E, S> {
     ///
     /// [`PutResult`]: struct.PutResult.html
     pub fn peek_or_put(&mut self, k: K, v: V) -> (Option<&V>, Option<PutResult<K, V>>) {
-        match self.map.get(&k) {
+        match self.map.get_index_of(&k) {
             None => (None, Some(self.put_in_result(k, v))),
-            Some(ent) => (Some(&ent.val), None),
+            // indirection through `index` needed to avoid rust-lang/rust#54663
+            Some(index) => (Some(&self.map.get_index(index).unwrap().1.val), None),
         }
     }
 
@@ -758,9 +771,13 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> RawLRU<K, V, E, S> {
     ///
     /// [`PutResult`]: struct.PutResult.html
     pub fn peek_mut_or_put(&mut self, k: K, v: V) -> (Option<&mut V>, Option<PutResult<K, V>>) {
-        match self.map.get_mut(&k) {
+        match self.map.get_index_of(&k) {
             None => (None, Some(self.put_in_result(k, v))),
-            Some(v) => (Some(&mut v.val), None),
+            // indirection through `index` needed to avoid rust-lang/rust#54663
+            Some(index) => (
+                Some(&mut self.map.get_index_mut(index).unwrap().1.val),
+                None,
+            ),
         }
     }
 
@@ -1463,7 +1480,7 @@ impl<'a, K, V, S> DoubleEndedIterator for MRUIter<'a, K, V, S> {
 }
 
 /// An iterator over the entries from less recent used to most recent used.
-pub type LRUIter<'a, K: 'a, V: 'a, S> = Rev<MRUIter<'a, K, V, S>>;
+pub type LRUIter<'a, K, V, S> = Rev<MRUIter<'a, K, V, S>>;
 
 #[cfg(never)]
 /// An iterator over mutable entries, from most recent used to less recent used.
@@ -1621,6 +1638,7 @@ macro_rules! impl_values_iterator {
     }
 }
 
+#[cfg(never)]
 macro_rules! impl_values_mut_iterator {
     ($($t:ty),*) => {
         $(
@@ -2160,6 +2178,7 @@ mod tests {
             assert_eq!(iter.len(), 0);
             assert_eq!(iter.next(), None);
         }
+        #[cfg(never)]
         {
             // values mut mru
             let mut iter = cache.values_mut();
@@ -2175,6 +2194,7 @@ mod tests {
             assert_eq!(iter.len(), 0);
             assert_eq!(iter.next(), None);
         }
+        #[cfg(never)]
         {
             // values mut lru
             let mut iter = cache.values_lru_mut();
@@ -2268,6 +2288,7 @@ mod tests {
             assert_eq!(iter.len(), 0);
             assert_eq!(iter.next_back(), None);
         }
+        #[cfg(never)]
         {
             // values mut mru
             let mut iter = cache.values_mut();
@@ -2283,6 +2304,7 @@ mod tests {
             assert_eq!(iter.len(), 0);
             assert_eq!(iter.next_back(), None);
         }
+        #[cfg(never)]
         {
             // values mut lru
             let mut iter = cache.values_lru_mut();
@@ -2322,6 +2344,7 @@ mod tests {
             assert_eq!(iter.len(), 0);
             assert_eq!(iter.next(), None);
         }
+        #[cfg(never)]
         {
             // iter mut
             let mut iter = cache.iter_mut();
@@ -2352,6 +2375,7 @@ mod tests {
             assert_eq!(iter.len(), 0);
             assert_eq!(iter.next(), None);
         }
+        #[cfg(never)]
         {
             // iter lru mut
             let mut iter = cache.iter_lru_mut();
@@ -2392,6 +2416,7 @@ mod tests {
             assert_eq!(iter.next_back(), None);
         }
 
+        #[cfg(never)]
         {
             // iter mut
             let mut iter = cache.iter_mut();
@@ -2431,6 +2456,7 @@ mod tests {
             assert_eq!(iter.len(), 0);
             assert_eq!(iter.next_back(), None);
         }
+        #[cfg(never)]
         {
             // iter mut
             let mut iter = cache.iter_mut();

@@ -16,13 +16,13 @@ edition = "2018"
 name = "lru_cache"
 harness = false
 
-[[bench]]
-name = "two_queue_cache"
-harness = false
+# [[bench]]
+# name = "two_queue_cache"
+# harness = false
 
-[[bench]]
-name = "arc_cache"
-harness = false
+# [[bench]]
+# name = "arc_cache"
+# harness = false
 
 [[bench]]
 name = "segmented_cache"

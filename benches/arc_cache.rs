@@ -1,3 +1,4 @@
+#![cfg(any())]
 use caches::{AdaptiveCache, AdaptiveCacheBuilder, Cache};
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
 use fnv::FnvBuildHasher;
