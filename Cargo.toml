@@ -41,6 +41,7 @@ std = ["rand", "rand/std", "rand/std_rng"]
 nightly = ["rand/nightly"]
 
 [dependencies]
+equivalent = "1.0.1"
 hashbrown = "0.14"
 indexmap = { version = "2.0.2", default-features = false }
 rand = {version = "0.8", optional = true}

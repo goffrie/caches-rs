@@ -7,12 +7,12 @@
 use crate::lfu::tinylfu::bloom::Bloom;
 use crate::lfu::tinylfu::sketch::CountMinSketch;
 use crate::lfu::{DefaultKeyHasher, KeyHasher};
-use core::borrow::Borrow;
 use core::hash::Hash;
 use core::marker::PhantomData;
 
 mod bloom;
 mod error;
+use equivalent::Equivalent;
 pub use error::TinyLFUError;
 mod sketch;
 
@@ -159,8 +159,7 @@ impl<K: Hash + Eq, KH: KeyHasher<K>> TinyLFU<K, KH> {
     /// [TinyLFU: A Highly Efficient Cache Admission Policy §3.4.2]: https://arxiv.org/pdf/1512.00727.pdf
     pub fn estimate<Q>(&self, key: &Q) -> u64
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + ?Sized + Equivalent<K>,
     {
         let kh = self.hash_key(key);
         let mut hits = self.ctr.estimate(kh);
@@ -193,10 +192,9 @@ impl<K: Hash + Eq, KH: KeyHasher<K>> TinyLFU<K, KH> {
     /// [`increment`]: struct.TinyLFU.method.increment.html
     pub fn increment_keys<Q>(&mut self, keys: &[&Q])
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + ?Sized + Equivalent<K>,
     {
-        keys.iter().for_each(|k| self.increment(k))
+        keys.iter().for_each(|k| self.increment(*k))
     }
 
     /// increment multiple hashed keys, for details, please see [`increment_keys`].
@@ -211,8 +209,7 @@ impl<K: Hash + Eq, KH: KeyHasher<K>> TinyLFU<K, KH> {
     /// [TinyLFU: A Highly Efficient Cache Admission Policy]: https://arxiv.org/pdf/1512.00727.pdf
     pub fn increment<Q>(&mut self, key: &Q)
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + ?Sized + Equivalent<K>,
     {
         let kh = self.hash_key(key);
         // Flip doorkeeper bit if not already done.
@@ -275,8 +272,7 @@ impl<K: Hash + Eq, KH: KeyHasher<K>> TinyLFU<K, KH> {
     /// returns true if the hash was added to the TinyLFU.
     pub fn contains<Q>(&self, key: &Q) -> bool
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + ?Sized + Equivalent<K>,
     {
         let kh = self.hash_key(key);
         self.doorkeeper.contains(kh)
@@ -291,8 +287,7 @@ impl<K: Hash + Eq, KH: KeyHasher<K>> TinyLFU<K, KH> {
     /// `eq` compares `a` and `b`, returns if `a`'s counter is equal to `b`'s counter.
     pub fn eq<Q>(&'_ self, a: &Q, b: &Q) -> bool
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + ?Sized + Equivalent<K>,
     {
         let (a_ctr, b_ctr) = self.compare_helper(a, b);
 
@@ -302,8 +297,7 @@ impl<K: Hash + Eq, KH: KeyHasher<K>> TinyLFU<K, KH> {
     /// `le` compares `a` and `b`, returns if `a`'s counter is less or equal to `b`'s counter.
     pub fn le<Q>(&'_ self, a: &Q, b: &Q) -> bool
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + ?Sized + Equivalent<K>,
     {
         let (a_ctr, b_ctr) = self.compare_helper(a, b);
 
@@ -313,8 +307,7 @@ impl<K: Hash + Eq, KH: KeyHasher<K>> TinyLFU<K, KH> {
     /// `lt` compares `a` and `b`, returns if `a`'s counter is less than `b`'s counter.
     pub fn lt<Q>(&'_ self, a: &Q, b: &Q) -> bool
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + ?Sized + Equivalent<K>,
     {
         let (a_ctr, b_ctr) = self.compare_helper(a, b);
 
@@ -324,8 +317,7 @@ impl<K: Hash + Eq, KH: KeyHasher<K>> TinyLFU<K, KH> {
     /// `gt` compares `a` and `b`, returns if `a`'s counter is greater than `b`'s counter.
     pub fn gt<Q>(&'_ self, a: &Q, b: &Q) -> bool
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + ?Sized + Equivalent<K>,
     {
         let (a_ctr, b_ctr) = self.compare_helper(a, b);
 
@@ -335,8 +327,7 @@ impl<K: Hash + Eq, KH: KeyHasher<K>> TinyLFU<K, KH> {
     /// `ge` compares `a` and `b`, returns if `a`'s counter is greater or equal to `b`'s counter.
     pub fn ge<Q>(&'_ self, a: &Q, b: &Q) -> bool
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + ?Sized + Equivalent<K>,
     {
         let (a_ctr, b_ctr) = self.compare_helper(a, b);
 
@@ -345,8 +336,7 @@ impl<K: Hash + Eq, KH: KeyHasher<K>> TinyLFU<K, KH> {
 
     fn compare_helper<Q>(&'_ self, a: &Q, b: &Q) -> (u64, u64)
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + ?Sized + Equivalent<K>,
     {
         let akh = self.hash_key(a);
         let mut a_ctr = 0;
@@ -379,8 +369,7 @@ impl<K: Hash + Eq, KH: KeyHasher<K>> TinyLFU<K, KH> {
     #[inline]
     pub fn hash_key<Q>(&self, k: &Q) -> u64
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + ?Sized + Equivalent<K>,
     {
         self.kh.hash_key(k)
     }

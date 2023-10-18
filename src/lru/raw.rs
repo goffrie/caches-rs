@@ -23,13 +23,12 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
-use alloc::borrow::Borrow;
-
 use alloc::collections::{BTreeMap, BTreeSet, BinaryHeap, LinkedList, VecDeque};
 use alloc::vec::Vec;
 use core::hash::{BuildHasher, Hash};
 use core::iter::{FromIterator, FusedIterator, Rev};
 use core::{fmt, mem};
+use equivalent::Equivalent;
 use hashbrown::HashMap;
 use indexmap::IndexMap;
 
@@ -281,10 +280,9 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> Cache<K, V> for RawLRU
     /// assert_eq!(cache.get(&2), Some(&"c"));
     /// assert_eq!(cache.get(&3), Some(&"d"));
     /// ```
-    fn get<'a, Q>(&'a mut self, k: &'a Q) -> Option<&'a V>
+    fn get<'a, Q>(&'a mut self, k: &Q) -> Option<&'a V>
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + ?Sized + Equivalent<K>,
     {
         if let Some(index) = self.get_index_of(k) {
             Some(&self.map.get_index(index).unwrap().1.val)
@@ -311,10 +309,9 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> Cache<K, V> for RawLRU
     /// assert_eq!(cache.get_mut(&"banana"), Some(&mut 6));
     /// assert_eq!(cache.get_mut(&"pear"), Some(&mut 2));
     /// ```
-    fn get_mut<'a, Q>(&'a mut self, k: &'a Q) -> Option<&'a mut V>
+    fn get_mut<'a, Q>(&'a mut self, k: &Q) -> Option<&'a mut V>
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + ?Sized + Equivalent<K>,
     {
         if let Some(index) = self.map.get_index_of(k) {
             self.detach(index);
@@ -342,10 +339,9 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> Cache<K, V> for RawLRU
     /// assert_eq!(cache.peek(&1), Some(&"a"));
     /// assert_eq!(cache.peek(&2), Some(&"b"));
     /// ```
-    fn peek<'a, Q>(&'a self, k: &'a Q) -> Option<&'a V>
+    fn peek<'a, Q>(&'a self, k: &Q) -> Option<&'a V>
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + ?Sized + Equivalent<K>,
     {
         self.map.get(k).map(|node| &node.val)
     }
@@ -366,10 +362,9 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> Cache<K, V> for RawLRU
     /// assert_eq!(cache.peek_mut(&1), Some(&mut "a"));
     /// assert_eq!(cache.peek_mut(&2), Some(&mut "b"));
     /// ```
-    fn peek_mut<'a, Q>(&'a mut self, k: &'a Q) -> Option<&'a mut V>
+    fn peek_mut<'a, Q>(&'a mut self, k: &Q) -> Option<&'a mut V>
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + ?Sized + Equivalent<K>,
     {
         match self.map.get_mut(k) {
             None => None,
@@ -397,8 +392,7 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> Cache<K, V> for RawLRU
     #[inline]
     fn contains<Q>(&self, k: &Q) -> bool
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + ?Sized + Equivalent<K>,
     {
         self.map.contains_key(k)
     }
@@ -421,8 +415,7 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> Cache<K, V> for RawLRU
     /// ```
     fn remove<Q>(&mut self, k: &Q) -> Option<V>
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + ?Sized + Equivalent<K>,
     {
         self.remove_and_return_ent(k).map(|(_k, v)| v)
     }
@@ -709,8 +702,7 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> RawLRU<K, V, E, S> {
 
     pub(crate) fn get_index_of<Q>(&mut self, k: &Q) -> Option<usize>
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + ?Sized + Equivalent<K>,
     {
         if let Some(index) = self.map.get_index_of(k) {
             self.detach(index);
@@ -1190,10 +1182,7 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> RawLRU<K, V, E, S> {
 
     pub(crate) fn put_in_full(&mut self, k: K, v: V) -> (usize, Option<(K, V)>) {
         if self.len() >= self.cap() {
-            let (tmp_index, old_v) = self.map.insert_full(
-                k,
-                EntryNode::new(v),
-            );
+            let (tmp_index, old_v) = self.map.insert_full(k, EntryNode::new(v));
             assert!(old_v.is_none());
             assert_eq!(tmp_index + 1, self.map.len());
 
@@ -1205,10 +1194,7 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> RawLRU<K, V, E, S> {
             self.cb(&old.0, &old.1.val);
             (index, Some((old.0, old.1.val)))
         } else {
-            let (new_index, old_v) = self.map.insert_full(
-                k,
-                EntryNode::new(v),
-            );
+            let (new_index, old_v) = self.map.insert_full(k, EntryNode::new(v));
             assert!(old_v.is_none());
             self.attach(new_index);
             (new_index, None)
@@ -1231,8 +1217,7 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> RawLRU<K, V, E, S> {
 
     pub(crate) fn remove_and_return_ent<Q>(&mut self, k: &Q) -> Option<(K, V)>
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + ?Sized + Equivalent<K>,
     {
         let index = self.map.get_index_of(k)?;
         Some(self.remove_by_index(index))
@@ -1759,6 +1744,7 @@ mod tests {
         assert_eq!(res.1, &kv.1);
     }
 
+    #[cfg(never)]
     fn assert_opt_eq_mut_tuple<K: PartialEq + Debug, V: PartialEq + Debug>(
         opt: Option<(&K, &mut V)>,
         kv: (K, V),

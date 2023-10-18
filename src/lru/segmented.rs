@@ -1,6 +1,7 @@
+use equivalent::Equivalent;
+
 use crate::lru::{CacheError, RawLRU};
 use crate::{Cache, DefaultEvictCallback, DefaultHashBuilder, PutResult};
-use core::borrow::Borrow;
 use core::hash::{BuildHasher, Hash};
 
 /// `SegmentedCacheBuilder` is used to help build a [`SegmentedCache`] with custom configurations.
@@ -303,8 +304,7 @@ impl<K: Hash + Eq, V, FH: BuildHasher, RH: BuildHasher> SegmentedCache<K, V, FH,
 
     fn move_to_protected<Q>(&mut self, k: &Q) -> Option<&mut V>
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + ?Sized + Equivalent<K>,
     {
         // remove the element from the probationary LRU
         // and put it in protected LRU.
@@ -381,10 +381,9 @@ impl<K: Hash + Eq, V, FH: BuildHasher, RH: BuildHasher> Cache<K, V>
     ///
     /// assert_eq!(cache.get(&"banana"), Some(&6));
     /// ```
-    fn get<'a, Q>(&'a mut self, k: &'a Q) -> Option<&'a V>
+    fn get<'a, Q>(&'a mut self, k: &Q) -> Option<&'a V>
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + ?Sized + Equivalent<K>,
     {
         if let Some(index) = self.protected.get_index_of(k) {
             // already in protected LRU, we move it to the front.
@@ -414,10 +413,9 @@ impl<K: Hash + Eq, V, FH: BuildHasher, RH: BuildHasher> Cache<K, V>
     ///
     /// assert_eq!(cache.get_mut(&"banana"), Some(&mut 6));
     /// ```
-    fn get_mut<'a, Q>(&'a mut self, k: &'a Q) -> Option<&'a mut V>
+    fn get_mut<'a, Q>(&'a mut self, k: &Q) -> Option<&'a mut V>
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + ?Sized + Equivalent<K>,
     {
         if let Some(index) = self.protected.get_index_of(k) {
             // already in protected LRU, we move it to the front
@@ -446,10 +444,9 @@ impl<K: Hash + Eq, V, FH: BuildHasher, RH: BuildHasher> Cache<K, V>
     /// assert_eq!(cache.peek(&1), Some(&"a"));
     /// assert_eq!(cache.peek(&2), Some(&"b"));
     /// ```
-    fn peek<'a, Q>(&'a self, k: &'a Q) -> Option<&'a V>
+    fn peek<'a, Q>(&'a self, k: &Q) -> Option<&'a V>
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + ?Sized + Equivalent<K>,
     {
         match self.protected.peek(k) {
             Some(x) => Some(x),
@@ -473,10 +470,9 @@ impl<K: Hash + Eq, V, FH: BuildHasher, RH: BuildHasher> Cache<K, V>
     /// assert_eq!(cache.peek_mut(&1), Some(&mut "a"));
     /// assert_eq!(cache.peek_mut(&2), Some(&mut "b"));
     /// ```
-    fn peek_mut<'a, Q>(&'a mut self, k: &'a Q) -> Option<&'a mut V>
+    fn peek_mut<'a, Q>(&'a mut self, k: &Q) -> Option<&'a mut V>
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + ?Sized + Equivalent<K>,
     {
         match self.protected.peek_mut(k) {
             Some(x) => Some(x),
@@ -503,8 +499,7 @@ impl<K: Hash + Eq, V, FH: BuildHasher, RH: BuildHasher> Cache<K, V>
     /// ```
     fn contains<Q>(&self, k: &Q) -> bool
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + ?Sized + Equivalent<K>,
     {
         self.protected.contains(k) || self.probationary.contains(k)
     }
@@ -528,8 +523,7 @@ impl<K: Hash + Eq, V, FH: BuildHasher, RH: BuildHasher> Cache<K, V>
     /// ```
     fn remove<Q>(&mut self, k: &Q) -> Option<V>
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + ?Sized + Equivalent<K>,
     {
         self.probationary
             .remove(k)

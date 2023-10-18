@@ -1,4 +1,5 @@
 mod error;
+use equivalent::Equivalent;
 pub use error::WTinyLFUError;
 
 use crate::lfu::{
@@ -7,7 +8,6 @@ use crate::lfu::{
 };
 use crate::lru::{SegmentedCache, SegmentedCacheBuilder};
 use crate::{Cache, DefaultHashBuilder, LRUCache, PutResult};
-use core::borrow::Borrow;
 use core::hash::{BuildHasher, Hash};
 use core::marker::PhantomData;
 
@@ -522,10 +522,9 @@ impl<K: Hash + Eq, V, KH: KeyHasher<K>, FH: BuildHasher, RH: BuildHasher, WH: Bu
     ///
     /// assert_eq!(cache.get(&"banana"), Some(&6));
     /// ```
-    fn get<'a, Q>(&'a mut self, k: &'a Q) -> Option<&'a V>
+    fn get<'a, Q>(&'a mut self, k: &Q) -> Option<&'a V>
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + ?Sized + Equivalent<K>,
     {
         self.tinylfu.try_reset();
         self.tinylfu.increment(k);
@@ -551,10 +550,9 @@ impl<K: Hash + Eq, V, KH: KeyHasher<K>, FH: BuildHasher, RH: BuildHasher, WH: Bu
     ///
     /// assert_eq!(cache.get_mut(&"banana"), Some(&mut 6));
     /// ```
-    fn get_mut<'a, Q>(&'a mut self, k: &'a Q) -> Option<&'a mut V>
+    fn get_mut<'a, Q>(&'a mut self, k: &Q) -> Option<&'a mut V>
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + ?Sized + Equivalent<K>,
     {
         self.tinylfu.try_reset();
         self.tinylfu.increment(k);
@@ -581,10 +579,9 @@ impl<K: Hash + Eq, V, KH: KeyHasher<K>, FH: BuildHasher, RH: BuildHasher, WH: Bu
     /// assert_eq!(cache.peek(&1), Some(&"a"));
     /// assert_eq!(cache.peek(&2), Some(&"b"));
     /// ```
-    fn peek<'a, Q>(&'a self, k: &'a Q) -> Option<&'a V>
+    fn peek<'a, Q>(&'a self, k: &Q) -> Option<&'a V>
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + ?Sized + Equivalent<K>,
     {
         self.lru.peek(k).or_else(|| self.slru.peek(k))
     }
@@ -606,10 +603,9 @@ impl<K: Hash + Eq, V, KH: KeyHasher<K>, FH: BuildHasher, RH: BuildHasher, WH: Bu
     /// assert_eq!(cache.peek_mut(&1), Some(&mut "a"));
     /// assert_eq!(cache.peek_mut(&2), Some(&mut "b"));
     /// ```
-    fn peek_mut<'a, Q>(&'a mut self, k: &'a Q) -> Option<&'a mut V>
+    fn peek_mut<'a, Q>(&'a mut self, k: &Q) -> Option<&'a mut V>
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Hash + ?Sized + Equivalent<K>,
     {
         match self.lru.peek_mut(k) {
             Some(x) => Some(x),
@@ -619,16 +615,14 @@ impl<K: Hash + Eq, V, KH: KeyHasher<K>, FH: BuildHasher, RH: BuildHasher, WH: Bu
 
     fn contains<Q>(&self, k: &Q) -> bool
     where
-        K: Borrow<Q>,
-        Q: Eq + Hash + ?Sized,
+        Q: Hash + ?Sized + Equivalent<K>,
     {
         self.lru.contains(k) || self.slru.contains(k)
     }
 
     fn remove<Q>(&mut self, k: &Q) -> Option<V>
     where
-        K: Borrow<Q>,
-        Q: Eq + Hash + ?Sized,
+        Q: Hash + ?Sized + Equivalent<K>,
     {
         self.lru.remove(k).or_else(|| self.slru.remove(k))
     }
