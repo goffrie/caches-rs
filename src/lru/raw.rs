@@ -1192,11 +1192,7 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> RawLRU<K, V, E, S> {
         if self.len() >= self.cap() {
             let (tmp_index, old_v) = self.map.insert_full(
                 k,
-                EntryNode {
-                    val: v,
-                    prev: usize::MAX,
-                    next: usize::MAX,
-                },
+                EntryNode::new(v),
             );
             assert!(old_v.is_none());
             assert_eq!(tmp_index + 1, self.map.len());
@@ -1211,11 +1207,7 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> RawLRU<K, V, E, S> {
         } else {
             let (new_index, old_v) = self.map.insert_full(
                 k,
-                EntryNode {
-                    val: v,
-                    prev: usize::MAX,
-                    next: usize::MAX,
-                },
+                EntryNode::new(v),
             );
             assert!(old_v.is_none());
             self.attach(new_index);
@@ -1319,8 +1311,27 @@ impl<K: Hash + Eq, V, E: OnEvictCallback, S: BuildHasher> RawLRU<K, V, E, S> {
         } else {
             node.prev = usize::MAX;
             node.next = self.head;
+            self.map.get_index_mut(self.head).unwrap().1.prev = index;
             self.head = index;
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn check_consistency(&self) {
+        assert_eq!(self.head == usize::MAX, self.map.is_empty());
+        assert_eq!(self.tail == usize::MAX, self.map.is_empty());
+        assert_eq!(self.head == self.tail, self.map.len() <= 1);
+        let mut last = usize::MAX;
+        let mut ptr = self.head;
+        let mut cnt = 0;
+        while ptr != usize::MAX {
+            let ent = &self.map.get_index(ptr).unwrap().1;
+            assert_eq!(ent.prev, last);
+            last = ptr;
+            ptr = ent.next;
+            cnt += 1;
+        }
+        assert_eq!(cnt, self.map.len());
     }
 
     #[inline]
@@ -2396,9 +2407,13 @@ mod tests {
     #[test]
     fn test_iter_backwards() {
         let mut cache = RawLRU::new(3).unwrap();
+        cache.check_consistency();
         cache.put("a", 1);
+        cache.check_consistency();
         cache.put("b", 2);
+        cache.check_consistency();
         cache.put("c", 3);
+        cache.check_consistency();
 
         {
             // iter const
