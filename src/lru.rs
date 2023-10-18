@@ -110,22 +110,21 @@
 //! [`TwoQueueCacheExample`]: https://github.com/al8n/caches-rs/blob/main/examples/two_queue_cache.rs
 //! [`AdaptiveCache`]: struct.AdaptiveCache.html
 //! [`AdaptiveCacheExample`]: https://github.com/al8n/caches-rs/blob/main/examples/adaptive_cache.rs
-mod adaptive;
+// mod adaptive;
 mod error;
 mod raw;
 mod segmented;
-mod two_queue;
+// mod two_queue;
 
-pub use adaptive::{AdaptiveCache, AdaptiveCacheBuilder};
+//pub use adaptive::{AdaptiveCache, AdaptiveCacheBuilder};
 pub use error::CacheError;
-pub use raw::{
-    KeysLRUIter, KeysMRUIter, LRUIter, LRUIterMut, MRUIter, MRUIterMut, RawLRU, ValuesLRUIter,
-    ValuesLRUIterMut, ValuesMRUIter, ValuesMRUIterMut,
-};
+pub use raw::{KeysLRUIter, KeysMRUIter, LRUIter, MRUIter, RawLRU, ValuesLRUIter, ValuesMRUIter};
+#[cfg(never)]
+pub use raw::{LRUIterMut, MRUIterMut, ValuesLRUIterMut, ValuesMRUIterMut};
 pub use segmented::{SegmentedCache, SegmentedCacheBuilder};
-pub use two_queue::{
-    TwoQueueCache, TwoQueueCacheBuilder, DEFAULT_2Q_GHOST_RATIO, DEFAULT_2Q_RECENT_RATIO,
-};
+// pub use two_queue::{
+//     TwoQueueCache, TwoQueueCacheBuilder, DEFAULT_2Q_GHOST_RATIO, DEFAULT_2Q_RECENT_RATIO,
+// };
 
 use crate::lru::raw::EntryNode;
 use crate::DefaultEvictCallback;
@@ -136,11 +135,11 @@ use core::mem;
 /// `LRUCache` is a fixed size LRU cache.
 pub type LRUCache<K, V, S> = RawLRU<K, V, DefaultEvictCallback, S>;
 
-unsafe fn swap_value<K, V>(v: &mut V, ent: &mut EntryNode<K, V>) {
-    mem::swap(v, &mut (*ent.val.as_mut_ptr()) as &mut V);
-}
+// unsafe fn swap_value<K, V>(v: &mut V, ent: &mut EntryNode<K, V>) {
+//     mem::swap(v, &mut (*ent.val.as_mut_ptr()) as &mut V);
+// }
 
-fn debox<K: Hash + Eq, V>(bks: &mut Box<EntryNode<K, V>>) -> *mut EntryNode<K, V> {
-    let ent_ptr: *mut EntryNode<K, V> = &mut **bks;
-    ent_ptr
-}
+// fn debox<K: Hash + Eq, V>(bks: &mut Box<EntryNode<K, V>>) -> *mut EntryNode<K, V> {
+//     let ent_ptr: *mut EntryNode<K, V> = &mut **bks;
+//     ent_ptr
+// }

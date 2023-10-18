@@ -1,4 +1,4 @@
-use crate::lru::{debox, swap_value, CacheError, RawLRU};
+use crate::lru::{CacheError, RawLRU};
 use crate::{Cache, DefaultEvictCallback, DefaultHashBuilder, PutResult};
 use core::borrow::Borrow;
 use core::hash::{BuildHasher, Hash};
@@ -301,21 +301,22 @@ impl<K: Hash + Eq, V, FH: BuildHasher, RH: BuildHasher> SegmentedCache<K, V, FH,
         self.protected_size
     }
 
-    fn move_to_protected<T, Q>(&mut self, k: &Q, v: T) -> Option<T>
+    fn move_to_protected<Q>(&mut self, k: &Q) -> Option<&mut V>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         // remove the element from the probationary LRU
         // and put it in protected LRU.
-        if let Some(ent) = self.probationary.remove_and_return_ent(k) {
-            match self.protected.put_or_evict_box(ent) {
-                None => Some(v),
-                Some(old_ent) => {
-                    self.probationary.put_box(old_ent);
-                    Some(v)
+        if let Some((k, v)) = self.probationary.remove_and_return_ent(k) {
+            let (index, evicted) = self.protected.put_in_full(k, v);
+            match evicted {
+                None => (),
+                Some((evicted_k, evicted_v)) => {
+                    assert!(self.probationary.put_in(evicted_k, evicted_v).is_none());
                 }
             }
+            Some(&mut self.protected.map.get_index_mut(index).unwrap().1.val)
         } else {
             None
         }
@@ -346,31 +347,18 @@ impl<K: Hash + Eq, V, FH: BuildHasher, RH: BuildHasher> Cache<K, V>
     /// [`PutResult`]: struct.PutResult.html
     fn put(&mut self, k: K, mut v: V) -> PutResult<K, V> {
         // check if the value is already in protected segment and update it
-        if let Some(ent_ptr) = self
-            .protected
-            .map
-            .get_mut(&k)
-            .map(|bks| debox::<K, V>(bks))
-        {
-            self.protected.update(&mut v, ent_ptr);
-            return PutResult::Update(v);
+        if let Some(index) = self.protected.map.get_index_of(&k) {
+            return PutResult::Update(self.protected.update(v, index));
         }
 
         // check if the value is already in probationary segment and move it to protected segment
-        if self.probationary.contains(&k) {
-            return self
-                .probationary
-                .remove_and_return_ent(&k)
-                .and_then(|mut ent| {
-                    let ent_ptr = ent.as_mut();
-                    unsafe {
-                        swap_value(&mut v, ent_ptr);
-                    }
-                    self.protected
-                        .put_or_evict_box(ent)
-                        .map(|evicted_ent| self.probationary.put_box(evicted_ent))
-                })
-                .unwrap_or(PutResult::<K, V>::Update(v));
+        if let Some((k, old_v)) = self.probationary.remove_and_return_ent(&k) {
+            if let Some((evicted_k, evicted_v)) = self.protected.put_in(k, v) {
+                // transfer the evicted value back to `probationary`
+                // this cannot fail because we just removed an entry from it
+                assert!(self.probationary.put_in(evicted_k, evicted_v).is_none());
+            }
+            return PutResult::<K, V>::Update(old_v);
         }
 
         // this is a new entry
@@ -393,24 +381,23 @@ impl<K: Hash + Eq, V, FH: BuildHasher, RH: BuildHasher> Cache<K, V>
     ///
     /// assert_eq!(cache.get(&"banana"), Some(&6));
     /// ```
-    fn get<'a, Q>(&mut self, k: &'a Q) -> Option<&'a V>
+    fn get<'a, Q>(&'a mut self, k: &'a Q) -> Option<&'a V>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        self.protected
+        match self
+            .protected
             // already in protected LRU, we move it to the front
             .get(k)
-            // does not in protected LRU, we try to find it in
-            // probationary LRU
-            .or_else(|| {
-                self.probationary
-                    .peek(k)
-                    // we find the element in probationary LRU
-                    // remove the element from the probationary LRU
-                    // and put it in protected LRU.
-                    .and_then(|v| self.move_to_protected(k, v))
-            })
+        {
+            Some(x) => return Some(x),
+            None => {}
+        }
+        // we find the element in probationary LRU
+        // remove the element from the probationary LRU
+        // and put it in protected LRU.
+        self.move_to_protected(k).map(|v| &*v)
     }
 
     /// Returns a mutable reference to the value of the key in the cache or `None` if it
@@ -429,24 +416,24 @@ impl<K: Hash + Eq, V, FH: BuildHasher, RH: BuildHasher> Cache<K, V>
     ///
     /// assert_eq!(cache.get_mut(&"banana"), Some(&mut 6));
     /// ```
-    fn get_mut<'a, Q>(&mut self, k: &'a Q) -> Option<&'a mut V>
+    fn get_mut<'a, Q>(&'a mut self, k: &'a Q) -> Option<&'a mut V>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        self.protected
+        match self
+            .protected
             // already in protected LRU, we move it to the front
             .get_mut(k)
-            // does not in protected LRU, we try to find it in
-            // probationary LRU
-            .or_else(|| {
-                self.probationary
-                    .peek_mut(k)
-                    // we find the element in probationary LRU
-                    // remove the element from the probationary LRU
-                    // and put it in protected LRU.
-                    .and_then(|v| self.move_to_protected(k, v))
-            })
+        {
+            Some(x) => Some(x),
+            None => {
+                // we find the element in probationary LRU
+                // remove the element from the probationary LRU
+                // and put it in protected LRU.
+                self.move_to_protected(k)
+            }
+        }
     }
 
     /// Returns a reference to the value corresponding to the key in the cache or `None` if it is
@@ -465,12 +452,15 @@ impl<K: Hash + Eq, V, FH: BuildHasher, RH: BuildHasher> Cache<K, V>
     /// assert_eq!(cache.peek(&1), Some(&"a"));
     /// assert_eq!(cache.peek(&2), Some(&"b"));
     /// ```
-    fn peek<'a, Q>(&self, k: &'a Q) -> Option<&'a V>
+    fn peek<'a, Q>(&'a self, k: &'a Q) -> Option<&'a V>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        self.protected.peek(k).or_else(|| self.probationary.peek(k))
+        match self.protected.peek(k) {
+            Some(x) => Some(x),
+            None => self.probationary.peek(k),
+        }
     }
 
     /// Returns a mutable reference to the value corresponding to the key in the cache or `None` if it is
@@ -489,14 +479,15 @@ impl<K: Hash + Eq, V, FH: BuildHasher, RH: BuildHasher> Cache<K, V>
     /// assert_eq!(cache.peek_mut(&1), Some(&mut "a"));
     /// assert_eq!(cache.peek_mut(&2), Some(&mut "b"));
     /// ```
-    fn peek_mut<'a, Q>(&mut self, k: &'a Q) -> Option<&'a mut V>
+    fn peek_mut<'a, Q>(&'a mut self, k: &'a Q) -> Option<&'a mut V>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        self.protected
-            .peek_mut(k)
-            .or_else(|| self.probationary.peek_mut(k))
+        match self.protected.peek_mut(k) {
+            Some(x) => Some(x),
+            None => self.probationary.peek_mut(k),
+        }
     }
 
     /// Returns a bool indicating whether the given key is in the cache.

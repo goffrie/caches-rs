@@ -1,9 +1,9 @@
 use crate::lru::raw::EntryNode;
 use crate::lru::{
-    swap_value, CacheError, DefaultEvictCallback, KeysLRUIter, KeysMRUIter, LRUIter, LRUIterMut,
+    CacheError, DefaultEvictCallback, KeysLRUIter, KeysMRUIter, LRUIter, LRUIterMut,
     MRUIter, MRUIterMut, RawLRU, ValuesLRUIter, ValuesLRUIterMut, ValuesMRUIter, ValuesMRUIterMut,
 };
-use crate::{Cache, DefaultHashBuilder, KeyRef, PutResult};
+use crate::{Cache, DefaultHashBuilder, PutResult};
 use alloc::boxed::Box;
 use alloc::fmt;
 use core::borrow::Borrow;

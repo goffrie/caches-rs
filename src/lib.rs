@@ -90,6 +90,7 @@
 #![cfg_attr(docsrs, allow(unused_attributes))]
 #![cfg_attr(feature = "nightly", feature(negative_impls, auto_traits))]
 #![deny(missing_docs)]
+#![forbid(unsafe_code)]
 #![allow(clippy::blocks_in_if_conditions, clippy::enum_variant_names)]
 
 extern crate alloc;
@@ -106,8 +107,9 @@ use core::hash::{Hash, Hasher};
 
 pub mod lru;
 pub use lru::{
-    AdaptiveCache, AdaptiveCacheBuilder, LRUCache, RawLRU, SegmentedCache, SegmentedCacheBuilder,
-    TwoQueueCache, TwoQueueCacheBuilder,
+    // AdaptiveCache, AdaptiveCacheBuilder,
+    LRUCache, RawLRU, SegmentedCache, SegmentedCacheBuilder,
+    // TwoQueueCache, TwoQueueCacheBuilder,
 };
 
 mod cache_api;

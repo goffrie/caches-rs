@@ -3,7 +3,7 @@ use crate::lru::raw::{
     KeysLRUIter, KeysMRUIter, LRUIter, LRUIterMut, MRUIter, MRUIterMut, RawLRU, ValuesLRUIter,
     ValuesLRUIterMut, ValuesMRUIter, ValuesMRUIterMut,
 };
-use crate::lru::{swap_value, CacheError};
+use crate::lru::CacheError;
 use crate::{Cache, DefaultEvictCallback, DefaultHashBuilder, PutResult};
 use core::borrow::Borrow;
 use core::hash::{BuildHasher, Hash};
@@ -327,22 +327,16 @@ impl<K: Hash + Eq, V, RH: BuildHasher, REH: BuildHasher, FH: BuildHasher, FEH: B
     fn put(&mut self, k: K, mut v: V) -> PutResult<K, V> {
         // check if the value is contained in recent, and potentially
         // promote it to frequent
-        if self
+        if let Some((k, old_v)) = self
             .recent
             // here we remove an entry from recent LRU if key exists
             .remove_and_return_ent(&k)
-            .map(|mut ent| {
-                unsafe {
-                    swap_value(&mut v, ent.as_mut());
-                }
-                // here we add the entry to frequent LRU,
-                // the result will always be PutResult::Put
-                // because we have removed this entry from recent LRU
-                self.frequent.put_box(ent);
-            })
-            .is_some()
         {
-            return PutResult::Update(v);
+            // here we add the entry to frequent LRU,
+            // the result will always be None
+            // because we have removed this entry from recent LRU
+            assert!(self.frequent.put_in(k, v).is_none());
+            return PutResult::Update(old_v);
         }
 
         // check if the value is already in frequent and update it

@@ -522,7 +522,7 @@ impl<K: Hash + Eq, V, KH: KeyHasher<K>, FH: BuildHasher, RH: BuildHasher, WH: Bu
     ///
     /// assert_eq!(cache.get(&"banana"), Some(&6));
     /// ```
-    fn get<'a, Q>(&mut self, k: &'a Q) -> Option<&'a V>
+    fn get<'a, Q>(&'a mut self, k: &'a Q) -> Option<&'a V>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
@@ -530,7 +530,10 @@ impl<K: Hash + Eq, V, KH: KeyHasher<K>, FH: BuildHasher, RH: BuildHasher, WH: Bu
         self.tinylfu.try_reset();
         self.tinylfu.increment(k);
 
-        self.lru.get(k).or_else(|| self.slru.get(k))
+        match self.lru.get(k) {
+            Some(x) => Some(x),
+            None => self.slru.get(k),
+        }
     }
 
     /// Returns a mutable reference to the value of the key in the cache or `None`.
@@ -548,14 +551,17 @@ impl<K: Hash + Eq, V, KH: KeyHasher<K>, FH: BuildHasher, RH: BuildHasher, WH: Bu
     ///
     /// assert_eq!(cache.get_mut(&"banana"), Some(&mut 6));
     /// ```
-    fn get_mut<'a, Q>(&mut self, k: &'a Q) -> Option<&'a mut V>
+    fn get_mut<'a, Q>(&'a mut self, k: &'a Q) -> Option<&'a mut V>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         self.tinylfu.try_reset();
         self.tinylfu.increment(k);
-        self.lru.get_mut(k).or_else(|| self.slru.get_mut(k))
+        match self.lru.get_mut(k) {
+            Some(x) => Some(x),
+            None => self.slru.get_mut(k),
+        }
     }
 
     /// Returns a reference to the value corresponding to the key in the cache or `None` if it is
@@ -575,7 +581,7 @@ impl<K: Hash + Eq, V, KH: KeyHasher<K>, FH: BuildHasher, RH: BuildHasher, WH: Bu
     /// assert_eq!(cache.peek(&1), Some(&"a"));
     /// assert_eq!(cache.peek(&2), Some(&"b"));
     /// ```
-    fn peek<'a, Q>(&self, k: &'a Q) -> Option<&'a V>
+    fn peek<'a, Q>(&'a self, k: &'a Q) -> Option<&'a V>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
@@ -600,12 +606,15 @@ impl<K: Hash + Eq, V, KH: KeyHasher<K>, FH: BuildHasher, RH: BuildHasher, WH: Bu
     /// assert_eq!(cache.peek_mut(&1), Some(&mut "a"));
     /// assert_eq!(cache.peek_mut(&2), Some(&mut "b"));
     /// ```
-    fn peek_mut<'a, Q>(&mut self, k: &'a Q) -> Option<&'a mut V>
+    fn peek_mut<'a, Q>(&'a mut self, k: &'a Q) -> Option<&'a mut V>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        self.lru.peek_mut(k).or_else(|| self.slru.peek_mut(k))
+        match self.lru.peek_mut(k) {
+            Some(x) => Some(x),
+            None => self.slru.peek_mut(k),
+        }
     }
 
     fn contains<Q>(&self, k: &Q) -> bool
